@@ -1,23 +1,26 @@
+EXPLAIN ANALYZE
+WITH order_sales AS (
+    SELECT 
+        order_id,
+        SUM(quantity * unit_price) FILTER (WHERE status = 'FULFILLED') 
+            OVER (PARTITION BY order_id) AS gross_sales
+    FROM order_items
+)
 SELECT
     o.order_id,
     o.customer_id,
-    SUM(CASE WHEN oi.status = 'FULFILLED' THEN oi.quantity * oi.unit_price ELSE 0 END) AS gross_sales,
-    COALESCE(r.total_refund, 0) AS total_refund,
-    c.iso_code                                   AS currency
+    COALESCE(os.gross_sales, 0) AS gross_sales,
+    COALESCE(SUM(r.amount) FILTER (WHERE r.created_at::date = CURRENT_DATE - 1)
+        OVER (PARTITION BY r.order_id), 0) AS total_refund,
+    c.iso_code AS currency
 FROM orders o
-LEFT JOIN order_items oi
-       ON oi.order_id = o.order_id
-LEFT JOIN (
-    SELECT
-        order_id,
-        SUM(amount) AS total_refund
-    FROM refunds
-    WHERE created_at::date = CURRENT_DATE - 1
-    GROUP BY order_id
-) r ON r.order_id = o.order_id
+LEFT JOIN order_sales os
+       ON os.order_id = o.order_id
+LEFT JOIN refunds r
+       ON r.order_id = o.order_id  
 LEFT JOIN currencies c
        ON c.currency_id = o.currency_id
 WHERE o.created_at::date = CURRENT_DATE - 1
-GROUP BY
-    o.order_id, o.customer_id, r.total_refund, c.iso_code
 ORDER BY gross_sales DESC;
+
+EXPLAIN ANALYZE
